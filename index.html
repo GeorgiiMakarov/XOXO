@@ -222,6 +222,10 @@
       margin: 20px 0 0;
     }
 
+    .levels[hidden] {
+      display: none;
+    }
+
     .btn.mode.active {
       border-color: var(--blue);
       color: var(--blue);
@@ -341,6 +345,15 @@
           </button>
           <button id="mode-bot" class="btn mode" type="button">
             С ботом
+          </button>
+        </div>
+
+        <div id="levels" class="modes levels" role="group" aria-label="Уровень бота" hidden>
+          <button id="level-lite" class="btn mode active" type="button">
+            Lite
+          </button>
+          <button id="level-flash" class="btn mode" type="button">
+            Flash
           </button>
         </div>
 
@@ -551,6 +564,16 @@
     }
 
     const WINNING_PATTERNS = buildWinningPatterns();
+    const PATTERNS_BY_CELL = buildPatternsByCell();
+
+    // Паттерны по клеткам — для быстрых проверок бота.
+    function buildPatternsByCell() {
+      const acc = Array.from({ length: SIZE * SIZE }, () => []);
+      for (const pattern of WINNING_PATTERNS) {
+        for (const i of pattern.cells) acc[i].push(pattern);
+      }
+      return acc;
+    }
 
     const cells = Array(SIZE * SIZE).fill("");
     const history = [];
@@ -559,6 +582,7 @@
     let winningPatterns = [];
     let draw = false;
     let mode = "2p";
+    let botLevel = "lite";
     let botTimer = null;
 
     const BOT = "0";
@@ -575,6 +599,9 @@
       rules: document.getElementById("rules"),
       mode2p: document.getElementById("mode-2p"),
       modeBot: document.getElementById("mode-bot"),
+      levels: document.getElementById("levels"),
+      levelLite: document.getElementById("level-lite"),
+      levelFlash: document.getElementById("level-flash"),
       score: document.getElementById("score"),
       resetScore: document.getElementById("reset-score")
     };
@@ -644,10 +671,10 @@
       maybeBotMove();
     }
 
-    // Бот: забирает выигрыш, блокирует угрозу, иначе строит фигуры.
+    // Бот: Lite забирает выигрыш и строит фигуры; Flash ещё
+    // блокирует угрозы и вилки, строит вилки и готовит выигрыш заранее.
     function completesPattern(index, player) {
-      for (const pattern of WINNING_PATTERNS) {
-        if (!pattern.cells.includes(index)) continue;
+      for (const pattern of PATTERNS_BY_CELL[index]) {
         if (pattern.cells.every(i => i === index || cells[i] === player)) {
           return true;
         }
@@ -658,9 +685,7 @@
     function evaluateCell(index) {
       let value = 0;
 
-      for (const pattern of WINNING_PATTERNS) {
-        if (!pattern.cells.includes(index)) continue;
-
+      for (const pattern of PATTERNS_BY_CELL[index]) {
         let mine = 0;
         let blocked = false;
 
@@ -681,25 +706,33 @@
       return value;
     }
 
-    function chooseBotMove() {
-      const empty = [];
-      for (let i = 0; i < cells.length; i++) {
-        if (!cells[i]) empty.push(i);
+    // Flash: та же оценка плюс бонус за фигуры, которым после хода
+    // останется один знак до выигрыша — бот чаще готовит угрозы заранее.
+    function evaluateFlashCell(index) {
+      let value = evaluateCell(index);
+
+      for (const pattern of PATTERNS_BY_CELL[index]) {
+        let mine = 0;
+        let blocked = false;
+
+        for (const i of pattern.cells) {
+          if (i === index) continue;
+          if (cells[i] === BOT) mine++;
+          else if (cells[i]) blocked = true;
+        }
+
+        if (!blocked && mine === pattern.cells.length - 2) value += 4;
       }
 
-      for (const index of empty) {
-        if (completesPattern(index, BOT)) return index;
-      }
+      return value;
+    }
 
-      for (const index of empty) {
-        if (completesPattern(index, "X")) return index;
-      }
-
+    function bestHeuristic(pool, scoreFn = evaluateCell) {
       let best = -Infinity;
       let bestMoves = [];
 
-      for (const index of empty) {
-        const value = evaluateCell(index);
+      for (const index of pool) {
+        const value = scoreFn(index);
         if (value > best) {
           best = value;
           bestMoves = [index];
@@ -709,6 +742,82 @@
       }
 
       return bestMoves[Math.floor(Math.random() * bestMoves.length)];
+    }
+
+    // Сколько немедленных выигрышей будет у игрока после его хода
+    // в клетку index. Клетка временно занимается и возвращается.
+    function winningRepliesAfter(index, player) {
+      cells[index] = player;
+
+      let count = 0;
+      for (let i = 0; i < cells.length; i++) {
+        if (!cells[i] && completesPattern(i, player)) count++;
+      }
+
+      cells[index] = "";
+      return count;
+    }
+
+    function chooseLiteMove(empty) {
+      for (const index of empty) {
+        if (completesPattern(index, BOT)) return index;
+      }
+
+      return bestHeuristic(empty);
+    }
+
+    function chooseFlashMove(empty) {
+      for (const index of empty) {
+        if (completesPattern(index, BOT)) return index;
+      }
+
+      for (const index of empty) {
+        if (completesPattern(index, "X")) return index;
+      }
+
+      // Вилка: ход, после которого у бота два выигрышных ответа.
+      const forks = [];
+      for (const index of empty) {
+        if (winningRepliesAfter(index, BOT) >= 2) forks.push(index);
+      }
+      if (forks.length > 0) return bestHeuristic(forks);
+
+      // Вилка соперника: если у человека ровно одна вилочная клетка —
+      // занять её, пока вилка не случилась.
+      const humanForks = [];
+      for (const index of empty) {
+        if (winningRepliesAfter(index, "X") >= 2) humanForks.push(index);
+      }
+      if (humanForks.length === 1) return humanForks[0];
+
+      // Из лучших по оценке ходов убираем те, что дают вилку человеку.
+      const ranked = [...empty].sort((a, b) => evaluateFlashCell(b) - evaluateFlashCell(a));
+      const shortlist = ranked.slice(0, 8);
+      const safe = shortlist.filter(index => {
+        cells[index] = BOT;
+        let humanFork = false;
+        for (let j = 0; j < cells.length; j++) {
+          if (!cells[j] && winningRepliesAfter(j, "X") >= 2) {
+            humanFork = true;
+            break;
+          }
+        }
+        cells[index] = "";
+        return !humanFork;
+      });
+
+      return bestHeuristic(safe.length > 0 ? safe : shortlist, evaluateFlashCell);
+    }
+
+    function chooseBotMove() {
+      const empty = [];
+      for (let i = 0; i < cells.length; i++) {
+        if (!cells[i]) empty.push(i);
+      }
+
+      return botLevel === "flash"
+        ? chooseFlashMove(empty)
+        : chooseLiteMove(empty);
     }
 
     function maybeBotMove() {
@@ -763,11 +872,19 @@
       cellButtons[0].focus();
     }
 
+    function setLevel(next) {
+      if (botLevel === next) return;
+      botLevel = next;
+      ui.levelLite.classList.toggle("active", botLevel === "lite");
+      ui.levelFlash.classList.toggle("active", botLevel === "flash");
+    }
+
     function setMode(next) {
       if (mode === next) return;
       mode = next;
       ui.mode2p.classList.toggle("active", mode === "2p");
       ui.modeBot.classList.toggle("active", mode === "bot");
+      ui.levels.hidden = mode !== "bot";
       restart();
     }
 
@@ -861,6 +978,8 @@
     ui.undo.addEventListener("click", undoMove);
     ui.mode2p.addEventListener("click", () => setMode("2p"));
     ui.modeBot.addEventListener("click", () => setMode("bot"));
+    ui.levelLite.addEventListener("click", () => setLevel("lite"));
+    ui.levelFlash.addEventListener("click", () => setLevel("flash"));
     ui.resetScore.addEventListener("click", resetScore);
 
     // Навигация по полю стрелками.
