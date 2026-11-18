@@ -867,6 +867,24 @@
       }
       if (humanForks.length === 1) return humanForks[0];
 
+      // Две вилки и больше: занять вилочную клетку, если это ломает
+      // все вилки сразу — вилочные клетки часто прикрывают друг друга.
+      if (humanForks.length >= 2) {
+        const covering = humanForks.filter(index => {
+          cells[index] = BOT;
+          let forkLeft = false;
+          for (let j = 0; j < cells.length; j++) {
+            if (!cells[j] && winningRepliesAfter(j, "X") >= 2) {
+              forkLeft = true;
+              break;
+            }
+          }
+          cells[index] = "";
+          return !forkLeft;
+        });
+        if (covering.length > 0) return bestHeuristic(covering, evaluateFlashCell);
+      }
+
       // Из лучших по оценке ходов убираем те, что дают вилку человеку.
       const ranked = [...empty].sort((a, b) => evaluateFlashCell(b) - evaluateFlashCell(a));
       const shortlist = ranked.slice(0, 8);
@@ -884,6 +902,147 @@
       });
 
       return bestHeuristic(safe.length > 0 ? safe : shortlist, evaluateFlashCell);
+    }
+
+    // --- Поиск на 4 полухода для Flash: минимакс с альфа-бета ---
+    const SEARCH_DEPTH = 4;
+    const SEARCH_NODE_CAP = 20000;
+    const MATE_SCORE = 1000000;
+    let searchNodes = 0;
+    let searchAborted = false;
+
+    // Один проход по всем фигурам: выигрышные клетки обеих сторон,
+    // клетки развития угроз (два хода до выигрыша) и оценка доски.
+    function boardScan() {
+      const scan = {
+        botWin: [], humanWin: [],
+        botExt: new Set(), humanExt: new Set(),
+        score: 0
+      };
+      for (const pattern of WINNING_PATTERNS) {
+        let b = 0, x = 0;
+        const empties = [];
+        for (const i of pattern.cells) {
+          if (cells[i] === BOT) b++;
+          else if (cells[i] === "X") x++;
+          else empties.push(i);
+        }
+        if (b > 0 && x > 0) continue;
+        const len = pattern.cells.length;
+        if (b > 0) {
+          const d = len - b;
+          scan.score += d === 1 ? 1000 : d === 2 ? 100 : d === 3 ? 10 : 1;
+          if (d === 1) scan.botWin.push(empties[0]);
+          else if (d === 2) { scan.botExt.add(empties[0]); scan.botExt.add(empties[1]); }
+        } else if (x > 0) {
+          const d = len - x;
+          scan.score -= d === 1 ? 1000 : d === 2 ? 100 : d === 3 ? 10 : 1;
+          if (d === 1) scan.humanWin.push(empties[0]);
+          else if (d === 2) { scan.humanExt.add(empties[0]); scan.humanExt.add(empties[1]); }
+        }
+      }
+      return scan;
+    }
+
+    // Кандидаты хода: выигрыш, блок, развитие своих угроз и лучшие
+    // по оценке клетки. Любой вилочный ответ соперника лежит в
+    // клетках развития угроз — они в списке всегда.
+    function searchCandidates(player, scan) {
+      const isBot = player === BOT;
+      const wins = isBot ? scan.botWin : scan.humanWin;
+      const blocks = isBot ? scan.humanWin : scan.botWin;
+      const ext = isBot ? scan.botExt : scan.humanExt;
+      const oppExt = isBot ? scan.humanExt : scan.botExt;
+      const scoreFn = isBot ? evaluateFlashCell : evaluateHumanCell;
+      const seen = new Set();
+      const ordered = [];
+      const push = (i) => { if (!seen.has(i)) { seen.add(i); ordered.push(i); } };
+      for (const i of wins) push(i);
+      for (const i of blocks) push(i);
+      // Оценку каждой клетки считаем один раз, а не в компараторе.
+      const extScored = [...ext].map(i => [scoreFn(i), i]);
+      extScored.sort((a, b) => b[0] - a[0]);
+      for (const [, i] of extScored) push(i);
+      // Клетки развития угроз соперника: ход туда ломает его фигуры.
+      const oppScored = [...oppExt].map(i => [scoreFn(i), i]);
+      oppScored.sort((a, b) => b[0] - a[0]);
+      for (const [, i] of oppScored) push(i);
+      const restScored = [];
+      for (let i = 0; i < cells.length; i++) {
+        if (cells[i] || seen.has(i)) continue;
+        const r = (i / SIZE) | 0, c = i % SIZE;
+        let near = 0;
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const rr = r + dr, cc = c + dc;
+            if (rr >= 0 && rr < SIZE && cc >= 0 && cc < SIZE && cells[rr * SIZE + cc]) near++;
+          }
+        }
+        const center = 3.5 - (Math.abs(r - 3.5) + Math.abs(c - 3.5));
+        restScored.push([near * 10 + center, i]);
+      }
+      restScored.sort((a, b) => b[0] - a[0]);
+      for (const [, i] of restScored.slice(0, 6)) push(i);
+      return ordered.slice(0, 16);
+    }
+
+    function searchValue(depth, ply, alpha, beta, maximizing) {
+      const scan = boardScan();
+      if (depth === 0 || searchAborted) return scan.score;
+      if (++searchNodes > SEARCH_NODE_CAP) {
+        searchAborted = true;
+        return scan.score;
+      }
+      const player = maximizing ? BOT : "X";
+      const moves = searchCandidates(player, scan);
+      if (moves.length === 0) return scan.score;
+      if (maximizing) {
+        let best = -Infinity;
+        for (const m of moves) {
+          cells[m] = BOT;
+          const won = completesPattern(m, BOT);
+          const v = won ? MATE_SCORE - ply : searchValue(depth - 1, ply + 1, alpha, beta, false);
+          cells[m] = "";
+          if (v > best) best = v;
+          if (best > alpha) alpha = best;
+          if (alpha >= beta) break;
+        }
+        return best;
+      }
+      let best = Infinity;
+      for (const m of moves) {
+        cells[m] = "X";
+        const won = completesPattern(m, "X");
+        const v = won ? -(MATE_SCORE - ply) : searchValue(depth - 1, ply + 1, alpha, beta, true);
+        cells[m] = "";
+        if (v < best) best = v;
+        if (best < beta) beta = best;
+        if (alpha >= beta) break;
+      }
+      return best;
+    }
+
+    // Корень поиска: лучший ход по минимаксу; null, если поиск не
+    // уложился в лимит узлов, — тогда решает тихая логика.
+    function searchBestMove() {
+      searchNodes = 0;
+      searchAborted = false;
+      const scan = boardScan();
+      const moves = searchCandidates(BOT, scan);
+      let bestMove = null;
+      let bestValue = -Infinity;
+      let alpha = -Infinity;
+      for (const m of moves) {
+        cells[m] = BOT;
+        const won = completesPattern(m, BOT);
+        const v = won ? MATE_SCORE : searchValue(SEARCH_DEPTH - 1, 1, alpha, Infinity, false);
+        cells[m] = "";
+        if (v > bestValue) { bestValue = v; bestMove = m; }
+        if (v > alpha) alpha = v;
+        if (searchAborted) break;
+      }
+      return searchAborted ? null : bestMove;
     }
 
     function chooseFlashMove(empty) {
@@ -927,6 +1086,30 @@
           return bestHeuristic(pool.map(t => t.index), evaluateFlashCell);
         }
       }
+
+      // Вилки остались, а контр-угрозы нет: занять вилочную клетку,
+      // если это ломает все вилки сразу — вилочные клетки часто
+      // прикрывают друг друга.
+      if (humanForks.length >= 2) {
+        const covering = humanForks.filter(index => {
+          cells[index] = BOT;
+          let forkLeft = false;
+          for (let j = 0; j < cells.length; j++) {
+            if (!cells[j] && winningRepliesAfter(j, "X") >= 2) {
+              forkLeft = true;
+              break;
+            }
+          }
+          cells[index] = "";
+          return !forkLeft;
+        });
+        if (covering.length > 0) return bestHeuristic(covering, evaluateFlashCell);
+      }
+
+      // Тихая позиция: сначала поиск на 4 полухода; если он не
+      // уложился в лимит узлов — тихая логика ниже.
+      const searched = searchBestMove();
+      if (searched !== null) return searched;
 
       // Тихая позиция: из лучших по оценке ходов убираем те, что дают
       // вилку человеку, а из оставшихся берём ход с учётом лучшего
