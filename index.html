@@ -1,0 +1,894 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>X и 0 — поле 8×8</title>
+
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --panel: #141d30;
+      --border: #293550;
+      --text: #f1f5ff;
+      --muted: #9aa9c4;
+      --blue: #74dbff;
+      --orange: #ffbc7c;
+      --green: #76efb7;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 10% 0%, #173154 0, transparent 40%),
+        radial-gradient(circle at 100% 20%, #292044 0, transparent 35%),
+        var(--bg);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    button { font: inherit; }
+
+    .app {
+      width: min(1080px, calc(100% - 32px));
+      margin: auto;
+      padding: 36px 0;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(32px, 6vw, 54px);
+      letter-spacing: -.05em;
+    }
+
+    h1 span { color: var(--blue); }
+
+    .subtitle {
+      margin: 10px 0 26px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(300px, .9fr);
+      gap: 20px;
+      align-items: start;
+    }
+
+    .panel {
+      padding: 22px;
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      background: var(--panel);
+      box-shadow: 0 20px 60px #0003;
+    }
+
+    .game-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .token {
+      display: grid;
+      flex: 0 0 48px;
+      height: 48px;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #1c2941;
+      font-size: 27px;
+      font-weight: 850;
+    }
+
+    .x { color: var(--blue); }
+    .zero { color: var(--orange); }
+
+    h2 {
+      margin: 0;
+      font-size: 21px;
+      letter-spacing: -.025em;
+    }
+
+    #detail {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .counter {
+      flex-shrink: 0;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+      gap: 8px;
+      margin: 22px 0;
+    }
+
+    .cell {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      aspect-ratio: 1;
+      place-items: center;
+      padding: 0;
+      border: 1px solid #344360;
+      border-radius: 14px;
+      background: linear-gradient(145deg, #22314c, #19243b);
+      font-size: clamp(26px, 6vw, 51px);
+      font-weight: 850;
+      line-height: 1;
+      cursor: pointer;
+      transition: border-color .15s, background .15s, transform .15s;
+      touch-action: manipulation;
+    }
+
+    .cell:not([aria-disabled="true"]):hover {
+      border-color: var(--blue);
+      background: #293d5b;
+      transform: translateY(-2px);
+    }
+
+    .cell[aria-disabled="true"] { cursor: default; }
+
+    .cell.win {
+      border-color: var(--green);
+      background: #174d43;
+      box-shadow: inset 0 0 0 1px var(--green);
+    }
+
+    .cell.last::after {
+      content: "";
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #ffffff80;
+    }
+
+    button:focus-visible {
+      outline: 3px solid var(--blue);
+      outline-offset: 3px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .btn {
+      min-height: 44px;
+      padding: 0 16px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--text);
+      background: #202d45;
+      font-weight: 750;
+      cursor: pointer;
+    }
+
+    .btn.primary {
+      border-color: transparent;
+      color: #08202c;
+      background: var(--blue);
+    }
+
+    .btn:disabled {
+      opacity: .4;
+      cursor: default;
+    }
+
+    .keyboard, .note {
+      margin: 16px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .modes {
+      display: flex;
+      gap: 10px;
+      margin: 20px 0 0;
+    }
+
+    .btn.mode.active {
+      border-color: var(--blue);
+      color: var(--blue);
+      background: #16283d;
+    }
+
+    .score-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 16px 0 0;
+    }
+
+    .score {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .btn.small {
+      min-height: 34px;
+      padding: 0 12px;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .rules-title { margin-bottom: 16px; }
+
+    .rules {
+      display: grid;
+      gap: 10px;
+    }
+
+    .rule {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #ffffff03;
+    }
+
+    .rule h3 {
+      margin: 0 0 4px;
+      font-size: 15px;
+    }
+
+    .rule p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .rule pre {
+      flex-shrink: 0;
+      margin: 0;
+      color: var(--blue);
+      font: 800 16px/1.05 ui-monospace, Consolas, monospace;
+      letter-spacing: 3px;
+    }
+
+    @media (max-width: 800px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 420px) {
+      .app {
+        width: calc(100% - 20px);
+        padding-top: 24px;
+      }
+
+      .panel {
+        padding: 15px;
+        border-radius: 18px;
+      }
+
+      .board { gap: 6px; }
+      .cell { border-radius: 10px; }
+      .counter { font-size: 11px; }
+      h2 { font-size: 19px; }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="app">
+    <header>
+      <p class="eyebrow">Локальная игра для двоих</p>
+      <h1>X и 0 <span>8×8</span></h1>
+      <p class="subtitle">
+        64 клетки. Семь способов победить. X начинает.
+      </p>
+    </header>
+
+    <div class="layout">
+      <section class="panel" aria-label="Игра">
+        <div class="game-top">
+          <div class="status-line">
+            <div id="token" class="token x" aria-hidden="true">X</div>
+
+            <div aria-live="polite" aria-atomic="true">
+              <h2 id="status">Ход X</h2>
+              <p id="detail">Выберите свободную клетку</p>
+            </div>
+          </div>
+
+          <span id="counter" class="counter">0 / 64</span>
+        </div>
+
+        <div class="modes" role="group" aria-label="Режим игры">
+          <button id="mode-2p" class="btn mode active" type="button">
+            2 игрока
+          </button>
+          <button id="mode-bot" class="btn mode" type="button">
+            С ботом
+          </button>
+        </div>
+
+        <div
+          id="board"
+          class="board"
+          role="group"
+          aria-label="Поле: 8 строк и 8 столбцов"
+        ></div>
+
+        <div class="actions">
+          <button id="restart" class="btn primary" type="button">
+            Новая партия
+          </button>
+          <button id="undo" class="btn" type="button" disabled>
+            Отменить ход
+          </button>
+        </div>
+
+        <div class="score-row">
+          <p id="score" class="score">Счёт: X — 0 · Ничьи — 0 · 0 — 0</p>
+          <button id="reset-score" class="btn small" type="button">
+            Сбросить счёт
+          </button>
+        </div>
+
+        <p class="keyboard">
+          Нажмите на свободную клетку, чтобы сделать ход.
+          С клавиатуры: стрелки — перемещение, Enter или пробел — ход.
+        </p>
+      </section>
+
+      <aside class="panel">
+        <p class="eyebrow">Условия победы</p>
+        <h2 class="rules-title">Соберите любую фигуру</h2>
+
+        <div id="rules" class="rules"></div>
+
+        <p class="note">
+          Все X на схемах обозначают знаки одного игрока — X или 0.
+          Фигуры можно перемещать, поворачивать и отражать.
+          Точка · обозначает клетку вне шаблона: она может быть
+          пустой или занятой любым знаком.
+        </p>
+      </aside>
+    </div>
+  </main>
+
+  <script>
+    const SIZE = 8;
+
+    /*
+      Шаблоны правил.
+      X — обязательный знак игрока.
+      . — клетка не участвует в проверке.
+
+      Для изменения формы C достаточно изменить ее шаблон здесь.
+    */
+    const RULES = [
+      {
+        name: "L",
+        description: "Фигура L из шести знаков — выигрывает только в вертикальном положении.",
+        verticalOnly: true,
+        masks: [[
+          "X..",
+          "X..",
+          "X..",
+          "XXX"
+        ]]
+      },
+      {
+        name: "||",
+        description: "Два соседних столбца по три знака.",
+        masks: [[
+          "XX",
+          "XX",
+          "XX"
+        ]]
+      },
+      {
+        name: "Молния",
+        description: "Три в ряд, один над левым краем и один под правым.",
+        masks: [[
+          "X..",
+          "XXX",
+          "..X"
+        ]]
+      },
+      {
+        name: "C",
+        description: "Шесть знаков: два сверху, два посередине и два снизу.",
+        masks: [[
+          "..XX",
+          "XX..",
+          "..XX"
+        ]]
+      },
+      {
+        name: "X из 6",
+        description: "Шесть знаков: четыре по углам и два в середине.",
+        masks: [[
+          "X.X",
+          ".X.",
+          ".X.",
+          "X.X"
+        ]]
+      },
+      {
+        name: "Зигзаг",
+        description: "Пять знаков зигзагом в двух соседних столбцах.",
+        masks: [[
+          ".X",
+          "X.",
+          ".X",
+          "X.",
+          ".X"
+        ]]
+      },
+      {
+        name: "Y",
+        description: "Семь знаков: вилка из четырёх и ножка из трёх.",
+        masks: [[
+          "X...X",
+          ".X.X.",
+          "..X..",
+          "..X..",
+          "..X.."
+        ]]
+      }
+    ];
+
+    // Создает уникальные повороты и отражения одного шаблона.
+    function variants(mask) {
+      const source = [];
+
+      mask.forEach((line, row) => {
+        [...line].forEach((symbol, col) => {
+          if (symbol === "X") source.push([row, col]);
+        });
+      });
+
+      const result = new Map();
+
+      for (const mirror of [1, -1]) {
+        for (let turns = 0; turns < 4; turns++) {
+          const transformed = source.map(([row, col]) => {
+            let r = row;
+            let c = col * mirror;
+
+            for (let i = 0; i < turns; i++) {
+              [r, c] = [c, -r];
+            }
+
+            return [r, c];
+          });
+
+          const minRow = Math.min(...transformed.map(p => p[0]));
+          const minCol = Math.min(...transformed.map(p => p[1]));
+
+          const normalized = transformed
+            .map(([r, c]) => [r - minRow, c - minCol])
+            .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+
+          const key = normalized.map(p => p.join(",")).join(";");
+          result.set(key, normalized);
+        }
+      }
+
+      return [...result.values()];
+    }
+
+    // Заранее размещаем все варианты фигур во всех местах поля.
+    function buildWinningPatterns() {
+      const patterns = [];
+
+      for (const rule of RULES) {
+        const seen = new Set();
+
+        for (const mask of rule.masks) {
+          for (const points of variants(mask)) {
+            const height = Math.max(...points.map(p => p[0])) + 1;
+            const width = Math.max(...points.map(p => p[1])) + 1;
+
+            // L выигрывает только в вертикальном положении.
+            if (rule.verticalOnly && height <= width) continue;
+
+            for (let row = 0; row <= SIZE - height; row++) {
+              for (let col = 0; col <= SIZE - width; col++) {
+                const indices = points.map(([r, c]) =>
+                  (row + r) * SIZE + col + c
+                );
+
+                const key = indices.join(",");
+                if (seen.has(key)) continue;
+
+                seen.add(key);
+                patterns.push({
+                  name: rule.name,
+                  cells: indices
+                });
+              }
+            }
+          }
+        }
+      }
+
+      return patterns;
+    }
+
+    const WINNING_PATTERNS = buildWinningPatterns();
+
+    const cells = Array(SIZE * SIZE).fill("");
+    const history = [];
+
+    let currentPlayer = "X";
+    let winningPatterns = [];
+    let draw = false;
+    let mode = "2p";
+    let botTimer = null;
+
+    const BOT = "0";
+    const score = { X: 0, "0": 0, draws: 0 };
+
+    const ui = {
+      board: document.getElementById("board"),
+      token: document.getElementById("token"),
+      status: document.getElementById("status"),
+      detail: document.getElementById("detail"),
+      counter: document.getElementById("counter"),
+      restart: document.getElementById("restart"),
+      undo: document.getElementById("undo"),
+      rules: document.getElementById("rules"),
+      mode2p: document.getElementById("mode-2p"),
+      modeBot: document.getElementById("mode-bot"),
+      score: document.getElementById("score"),
+      resetScore: document.getElementById("reset-score")
+    };
+
+    // Создаем кнопки один раз, чтобы не терять фокус при перерисовке.
+    const cellButtons = Array.from({ length: SIZE * SIZE }, (_, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "cell";
+      button.dataset.index = String(index);
+      button.addEventListener("click", () => play(index));
+      ui.board.appendChild(button);
+      return button;
+    });
+
+    // Карточки правил используют те же шаблоны, что и проверка победы.
+    for (const rule of RULES) {
+      const card = document.createElement("article");
+      card.className = "rule";
+
+      const copy = document.createElement("div");
+      const title = document.createElement("h3");
+      const description = document.createElement("p");
+      const diagram = document.createElement("pre");
+
+      title.textContent = rule.name;
+      description.textContent = rule.description;
+      diagram.textContent = rule.masks[0]
+        .map(line => line.replace(/\./g, "·"))
+        .join("\n");
+      diagram.setAttribute("aria-hidden", "true");
+
+      copy.append(title, description);
+      card.append(copy, diagram);
+      ui.rules.appendChild(card);
+    }
+
+    function finished() {
+      return winningPatterns.length > 0 || draw;
+    }
+
+    function play(index, byBot = false) {
+      if (finished() || cells[index]) return;
+      if (mode === "bot" && currentPlayer === BOT && !byBot) return;
+
+      cells[index] = currentPlayer;
+      history.push({ index, player: currentPlayer });
+
+      // Новая победная фигура обязательно включает последний ход.
+      winningPatterns = WINNING_PATTERNS.filter(pattern =>
+        pattern.cells.includes(index) &&
+        pattern.cells.every(i => cells[i] === currentPlayer)
+      );
+
+      draw =
+        winningPatterns.length === 0 &&
+        history.length === SIZE * SIZE;
+
+      if (finished()) {
+        if (winningPatterns.length > 0) score[currentPlayer]++;
+        else score.draws++;
+      } else {
+        currentPlayer = currentPlayer === "X" ? "0" : "X";
+      }
+
+      render();
+      maybeBotMove();
+    }
+
+    // Бот: забирает выигрыш, блокирует угрозу, иначе строит фигуры.
+    function completesPattern(index, player) {
+      for (const pattern of WINNING_PATTERNS) {
+        if (!pattern.cells.includes(index)) continue;
+        if (pattern.cells.every(i => i === index || cells[i] === player)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function evaluateCell(index) {
+      let value = 0;
+
+      for (const pattern of WINNING_PATTERNS) {
+        if (!pattern.cells.includes(index)) continue;
+
+        let mine = 0;
+        let blocked = false;
+
+        for (const i of pattern.cells) {
+          if (i === index) continue;
+          if (cells[i] === BOT) mine++;
+          else if (cells[i]) blocked = true;
+        }
+
+        if (!blocked) value += 1 + mine * mine * 3;
+      }
+
+      const row = Math.floor(index / SIZE);
+      const col = index % SIZE;
+      const center = (SIZE - 1) / 2;
+      value += 2 - (Math.abs(row - center) + Math.abs(col - center)) * 0.05;
+
+      return value;
+    }
+
+    function chooseBotMove() {
+      const empty = [];
+      for (let i = 0; i < cells.length; i++) {
+        if (!cells[i]) empty.push(i);
+      }
+
+      for (const index of empty) {
+        if (completesPattern(index, BOT)) return index;
+      }
+
+      for (const index of empty) {
+        if (completesPattern(index, "X")) return index;
+      }
+
+      let best = -Infinity;
+      let bestMoves = [];
+
+      for (const index of empty) {
+        const value = evaluateCell(index);
+        if (value > best) {
+          best = value;
+          bestMoves = [index];
+        } else if (value === best) {
+          bestMoves.push(index);
+        }
+      }
+
+      return bestMoves[Math.floor(Math.random() * bestMoves.length)];
+    }
+
+    function maybeBotMove() {
+      if (mode !== "bot" || finished() || currentPlayer !== BOT) return;
+
+      clearTimeout(botTimer);
+      botTimer = setTimeout(() => {
+        botTimer = null;
+        if (mode !== "bot" || finished() || currentPlayer !== BOT) return;
+        play(chooseBotMove(), true);
+      }, 400);
+    }
+
+    function undoMove() {
+      clearTimeout(botTimer);
+      botTimer = null;
+
+      const move = history.pop();
+      if (!move) return;
+
+      cells[move.index] = "";
+      let focusIndex = move.index;
+
+      // Против бота отменяем пару ходов: ход бота и ход человека.
+      if (mode === "bot" && move.player === BOT) {
+        const prev = history.pop();
+        if (prev) {
+          cells[prev.index] = "";
+          focusIndex = prev.index;
+        }
+      }
+
+      currentPlayer = history.length % 2 === 0 ? "X" : "0";
+      winningPatterns = [];
+      draw = false;
+
+      render();
+      cellButtons[focusIndex].focus();
+    }
+
+    function restart() {
+      clearTimeout(botTimer);
+      botTimer = null;
+
+      cells.fill("");
+      history.length = 0;
+      currentPlayer = "X";
+      winningPatterns = [];
+      draw = false;
+
+      render();
+      cellButtons[0].focus();
+    }
+
+    function setMode(next) {
+      if (mode === next) return;
+      mode = next;
+      ui.mode2p.classList.toggle("active", mode === "2p");
+      ui.modeBot.classList.toggle("active", mode === "bot");
+      restart();
+    }
+
+    function resetScore() {
+      score.X = 0;
+      score["0"] = 0;
+      score.draws = 0;
+      render();
+    }
+
+    function render() {
+      const highlighted = new Set(
+        winningPatterns.flatMap(pattern => pattern.cells)
+      );
+
+      const lastMove = history[history.length - 1];
+
+      cellButtons.forEach((button, index) => {
+        const value = cells[index];
+        const row = Math.floor(index / SIZE) + 1;
+        const col = index % SIZE + 1;
+
+        button.textContent = value;
+        button.className = "cell";
+
+        if (value === "X") button.classList.add("x");
+        if (value === "0") button.classList.add("zero");
+        if (highlighted.has(index)) button.classList.add("win");
+        if (lastMove && lastMove.index === index) {
+          button.classList.add("last");
+        }
+
+        // aria-disabled сохраняет возможность осматривать поле
+        // с клавиатуры. Функция play блокирует недопустимые ходы.
+        button.setAttribute(
+          "aria-disabled",
+          String(Boolean(value) || finished())
+        );
+
+        const content = value
+          ? (value === "X" ? "крестик" : "нолик")
+          : "пусто";
+
+        button.setAttribute(
+          "aria-label",
+          `Строка ${row}, столбец ${col}: ${content}` +
+          (highlighted.has(index) ? ". Победная фигура" : "")
+        );
+      });
+
+      ui.counter.textContent = `${history.length} / ${SIZE * SIZE}`;
+      ui.undo.disabled = history.length === 0;
+
+      ui.token.textContent = draw ? "—" : currentPlayer;
+      ui.token.className = "token";
+
+      if (!draw) {
+        ui.token.classList.add(currentPlayer === "X" ? "x" : "zero");
+      }
+
+      if (winningPatterns.length > 0) {
+        const names = [
+          ...new Set(winningPatterns.map(pattern => pattern.name))
+        ];
+
+        if (mode === "bot") {
+          ui.status.textContent = currentPlayer === "X"
+            ? "Вы победили!"
+            : "Победил бот!";
+        } else {
+          ui.status.textContent = `Победил ${currentPlayer}!`;
+        }
+        ui.detail.textContent = `Собрано: ${names.join(" · ")}`;
+      } else if (draw) {
+        ui.status.textContent = "Ничья";
+        ui.detail.textContent = "Поле заполнено. Начните новую партию.";
+      } else if (mode === "bot" && currentPlayer === BOT) {
+        ui.status.textContent = "Думает бот…";
+        ui.detail.textContent = "Подождите, бот выбирает ход";
+      } else {
+        ui.status.textContent = mode === "bot" ? "Ваш ход" : `Ход ${currentPlayer}`;
+        ui.detail.textContent = "Выберите свободную клетку";
+      }
+
+      ui.score.textContent = mode === "bot"
+        ? `Счёт: Вы (X) — ${score.X} · Ничьи — ${score.draws} · Бот (0) — ${score["0"]}`
+        : `Счёт: X — ${score.X} · Ничьи — ${score.draws} · 0 — ${score["0"]}`;
+    }
+
+    ui.restart.addEventListener("click", restart);
+    ui.undo.addEventListener("click", undoMove);
+    ui.mode2p.addEventListener("click", () => setMode("2p"));
+    ui.modeBot.addEventListener("click", () => setMode("bot"));
+    ui.resetScore.addEventListener("click", resetScore);
+
+    // Навигация по полю стрелками.
+    ui.board.addEventListener("keydown", event => {
+      const shifts = {
+        ArrowUp: [-1, 0],
+        ArrowDown: [1, 0],
+        ArrowLeft: [0, -1],
+        ArrowRight: [0, 1]
+      };
+
+      const shift = shifts[event.key];
+      const button = event.target.closest("button[data-index]");
+      if (!shift || !button) return;
+
+      event.preventDefault();
+
+      const index = Number(button.dataset.index);
+      const row = Math.floor(index / SIZE);
+      const col = index % SIZE;
+
+      const nextRow = Math.max(0, Math.min(SIZE - 1, row + shift[0]));
+      const nextCol = Math.max(0, Math.min(SIZE - 1, col + shift[1]));
+
+      cellButtons[nextRow * SIZE + nextCol].focus();
+    });
+
+    render();
+  </script>
+</body>
+</html>
